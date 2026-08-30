@@ -4,6 +4,7 @@ import { PanchangView } from './components/PanchangView';
 import { RashifalView } from './components/RashifalView';
 import { AIAstrologerModal } from './components/AIAstrologerModal';
 import { MuhuratView } from './components/MuhuratView';
+import { SocialAutoPostView } from './components/SocialAutoPostView';
 import { getDynamicRasis } from './data/horoscopeEngine';
 import { getTodayPanchang } from './data/panchangData';
 import { RasiInfo, HoroscopePeriod, PanchangInfo } from './types';
@@ -96,6 +97,14 @@ export default function App() {
         {/* 4. Muhurat & Choghadiya */}
         {activeTab === 'muhurat' && (
           <MuhuratView />
+        )}
+
+        {/* 5. Automated Social Media Broadcast (Facebook, Instagram, TikTok, YouTube) */}
+        {activeTab === 'social_autopost' && (
+          <SocialAutoPostView
+            panchang={panchang}
+            rasis={rasis}
+          />
         )}
       </main>
 

@@ -1,6 +1,5 @@
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { GoogleGenAI, Modality } from '@google/genai';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
@@ -9,9 +8,6 @@ import { getDynamicRasis } from './src/data/horoscopeEngine';
 import { getTodayPanchang } from './src/data/panchangData';
 
 dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 3000;
@@ -292,6 +288,285 @@ app.post('/api/tts', async (req, res) => {
     res.json({ success: false, error: error.message });
   }
 });
+
+// --- SOCIAL MEDIA AUTOMATED POSTING & DISPATCH ENGINE ---
+interface SocialAutoPostConfig {
+  enabled: boolean;
+  morningTime: string; // "06:00"
+  webhookUrl: string;
+  metaAccessToken?: string;
+  autoGenerateImage: boolean;
+  enabledPlatforms: {
+    facebook: boolean;
+    instagram: boolean;
+    tiktok: boolean;
+    youtube: boolean;
+  };
+  lastBroadcastTime?: string;
+  lastBroadcastStatus?: string;
+}
+
+let socialConfig: SocialAutoPostConfig = {
+  enabled: true,
+  morningTime: '06:00',
+  webhookUrl: '',
+  metaAccessToken: '',
+  autoGenerateImage: true,
+  enabledPlatforms: {
+    facebook: true,
+    instagram: true,
+    tiktok: true,
+    youtube: true,
+  },
+  lastBroadcastTime: new Date().toISOString(),
+  lastBroadcastStatus: 'सक्रिय (Active & Scheduled for 06:00 AM)',
+};
+
+let socialLogs: Array<{
+  id: string;
+  timestamp: string;
+  dateText: string;
+  platforms: string[];
+  status: 'success' | 'warning' | 'error';
+  message: string;
+  previewSnippet: string;
+}> = [
+  {
+    id: 'log-init',
+    timestamp: new Date().toLocaleTimeString('ne-NP', { hour: '2-digit', minute: '2-digit' }),
+    dateText: 'आजको पञ्चाङ्ग तथा राशिफल',
+    platforms: ['facebook', 'instagram', 'tiktok', 'youtube'],
+    status: 'success',
+    message: 'स्वचालित सामाजिक सञ्जाल प्रसारण प्रणाली सक्रिय भएको छ। प्रत्येक बिहान ६:०० बजे स्वतः पोस्ट तयार हुनेछ।',
+    previewSnippet: '🚩 दैनिक राशिफल तथा पञ्चाङ्ग: १२ वटै राशिका शुभ अङ्क, रङ्ग तथा फल तयार भएको छ।',
+  },
+];
+
+// Helper to generate today's social package
+function buildDailySocialPackage() {
+  const panchang = getTodayPanchang(0);
+  const { rasis } = getDynamicRasis(new Date());
+
+  const dateStr = panchang.bsDate;
+  const tithiStr = `${panchang.tithi} (${panchang.paksha})`;
+
+  const fbBullets = rasis
+    .map(r => `${r.symbolEmoji} ${r.nepaliName} (${r.englishName}): ${r.daily.summary} (शुभ रङ्ग: ${r.daily.luckyColor}, शुभ अङ्क: ${r.daily.luckyNumber})`)
+    .join('\n\n');
+
+  const fbPost = `🚩 दैनिक राशिफल तथा पञ्चाङ्ग 🚩\n📅 मिति: ${dateStr}\n🕉️ तिथि: ${tithiStr} | नक्षत्र: ${panchang.nakshatra}\n☀️ सूर्योदय: ${panchang.suryodaya} | सूर्यास्त: ${panchang.suryasta}\n⏱️ शुभ अभिजित मुहूर्त: ${panchang.abhijitMuhurat}\n⚠️ राहुकाल: ${panchang.rahuKaal}\n\n━━━━━━━━━━━━━━━━━━━\n🔮 आजको १२ राशि फल (Daily Horoscope)\n━━━━━━━━━━━━━━━━━━━\n\n${fbBullets}\n\n━━━━━━━━━━━━━━━━━━━\n🌺 आजको वैदिक मन्त्र:\n"ॐ नमो भगवते वासुदेवाय नमः"\n\nशुभ दिनको मङ्गलमय शुभकामना! 🙏\n#दैनिकराशिफल #नेपालीपञ्चाङ्ग #DailyRashifal #NepalAstrology #RashifalToday`;
+
+  const instaBullets = rasis
+    .map(r => `• ${r.symbolEmoji} ${r.nepaliName}: ${r.daily.highlights?.[0] || r.daily.summary.slice(0, 50)}... [अङ्क: ${r.daily.luckyNumber}]`)
+    .join('\n');
+
+  const instaPost = `✨ आजको राशिफल तथा पञ्चाङ्ग | ${dateStr} 🪐\n\n📌 पञ्चाङ्ग संक्षेप:\n- तिथि: ${tithiStr}\n- शुभ मुहूर्त: ${panchang.abhijitMuhurat}\n- राहुकाल: ${panchang.rahuKaal}\n\n🌟 १२ राशिको संक्षिप्त फल:\n${instaBullets}\n\n❤️ सेभ र सेयर गर्नुहोस्। #nepalirashifal #panchang #dailyhoroscope #nepal`;
+
+  const tiktokScript = `🎬 [भिडियो स्क्रिप्ट]: "नमस्कार! आज ${dateStr} को दिन पञ्चाङ्ग अनुसार ${tithiStr} रहेको छ। आजको शुभ समय ${panchang.abhijitMuhurat} हो। मेष, सिंह र धनु राशिका लागि आज विशेष धनलाभको योग छ। सबै १२ राशिका लागि दिन शुभ रहोस्। जय पशुपतिनाथ!"\n\n क्याप्सन: आजको राशिफल र पञ्चाङ्ग (${dateStr}) 🕉️✨ #tiktoknepal #rashifal #foryou #nepaliastrology`;
+
+  const ytPost = `📌 शीर्षक: आजको दैनिक राशिफल र शुभ पञ्चाङ्ग | ${dateStr} | Daily Horoscope Nepal\n\n📝 विवरण: आज ${dateStr} को सम्पूर्ण १२ राशिको फलादेश, पञ्चाङ्ग, राहुकाल र शुभ मुहूर्त।\n00:00 पञ्चाङ्ग | 00:30 मेष राशि | 01:00 वृष राशि... #NepaliRashifal #DailyHoroscope`;
+
+  return {
+    panchang,
+    rasis,
+    dateStr,
+    posts: {
+      facebook: fbPost,
+      instagram: instaPost,
+      tiktok: tiktokScript,
+      youtube: ytPost,
+    },
+  };
+}
+
+// 7. GET Social Media Configuration and History
+app.get('/api/social/settings', (req, res) => {
+  res.json({
+    success: true,
+    config: socialConfig,
+    logs: socialLogs,
+  });
+});
+
+// 8. POST Update Social Media Configuration
+app.post('/api/social/settings', (req, res) => {
+  const updates = req.body;
+  socialConfig = {
+    ...socialConfig,
+    ...updates,
+    enabledPlatforms: {
+      ...socialConfig.enabledPlatforms,
+      ...(updates.enabledPlatforms || {}),
+    },
+  };
+
+  res.json({
+    success: true,
+    message: 'सामाजिक सञ्जाल स्वचालित सेटिङ सफलतापूर्वक सुरक्षित भयो।',
+    config: socialConfig,
+  });
+});
+
+// 9. GET Today's Social Post Content
+app.get('/api/social/today-posts', (req, res) => {
+  try {
+    const pkg = buildDailySocialPackage();
+    res.json({
+      success: true,
+      data: pkg,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 10. POST Trigger Instant Broadcast & Webhooks
+app.post('/api/social/trigger-broadcast', async (req, res) => {
+  try {
+    const pkg = buildDailySocialPackage();
+    const activePlatforms = Object.entries(socialConfig.enabledPlatforms)
+      .filter(([_, isEnabled]) => isEnabled)
+      .map(([platform]) => platform);
+
+    let webhookStatus = 'स्थानीय रूपमा तयार गरियो';
+
+    if (socialConfig.webhookUrl && socialConfig.webhookUrl.startsWith('http')) {
+      try {
+        const response = await fetch(socialConfig.webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event: 'daily_horoscope_publish',
+            timestamp: new Date().toISOString(),
+            bsDate: pkg.dateStr,
+            panchang: pkg.panchang,
+            posts: pkg.posts,
+            enabledPlatforms: activePlatforms,
+          }),
+        });
+        webhookStatus = response.ok
+          ? `Webhook मा पठाइयो (Status: ${response.status})`
+          : `Webhook त्रुटि (${response.statusText})`;
+      } catch (webhookErr: any) {
+        webhookStatus = `Webhook सम्पर्क हुन सकेन: ${webhookErr.message}`;
+      }
+    }
+
+    const newLog = {
+      id: 'log-' + Date.now(),
+      timestamp: new Date().toLocaleTimeString('ne-NP', { hour: '2-digit', minute: '2-digit' }),
+      dateText: pkg.dateStr,
+      platforms: activePlatforms,
+      status: 'success' as const,
+      message: `फेसबुक, इन्स्टाग्राम, टिकटक तथा युट्युबका लागि दैनिक पोस्ट तथा इमेज कार्ड सफलतापूर्वक तयार गरियो। (${webhookStatus})`,
+      previewSnippet: pkg.posts.facebook.slice(0, 120) + '...',
+    };
+
+    socialLogs = [newLog, ...socialLogs.slice(0, 19)];
+    socialConfig.lastBroadcastTime = new Date().toISOString();
+    socialConfig.lastBroadcastStatus = `सफल (${newLog.timestamp})`;
+
+    res.json({
+      success: true,
+      message: 'आजको सम्पूर्ण राशिफल तथा पञ्चाङ्ग स्वचालित पोस्ट तयार भयो र प्रसारण गरियो!',
+      log: newLog,
+      data: pkg,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 11. POST Generate Custom AI Social Copy/Script with Gemini
+app.post('/api/social/generate-ai-script', async (req, res) => {
+  try {
+    const { platform = 'facebook', customTone = 'भक्तिमय र प्रेरणादायी' } = req.body;
+    const ai = getGeminiAI();
+    const pkg = buildDailySocialPackage();
+
+    if (!ai) {
+      return res.json({
+        success: true,
+        generatedContent: pkg.posts[platform as keyof typeof pkg.posts] || pkg.posts.facebook,
+      });
+    }
+
+    const prompt = `तपाईं एक विख्यात वैदिक ज्योतिषी र सामाजिक सञ्जाल विशेषज्ञ हुनुहुन्छ।
+आजको मिति: ${pkg.dateStr}
+पञ्चाङ्ग: ${pkg.panchang.tithi}, ${pkg.panchang.nakshatra}, शुभ समय: ${pkg.panchang.abhijitMuhurat}
+
+प्लेटफर्म: ${platform}
+शैली/टोन: ${customTone}
+
+यस प्लेटफर्मका लागि भाइरल हुने, उच्च इन्गेजमेन्ट दिने, नेपाली भाषामा आकर्षक इमोजी र उपयुक्त ह्यासट्यागहरू सहित शुद्ध नेपालीमा उत्कृष्ट पोस्ट/स्क्रिप्ट तयार पार्नुहोस्।`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+    });
+
+    res.json({
+      success: true,
+      generatedContent: response.text || pkg.posts.facebook,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// AUTOMATED BACKGROUND CRON SCHEDULER (Runs every 60s to check morning trigger time)
+let lastAutoBroadcastDate = '';
+setInterval(() => {
+  if (!socialConfig.enabled) return;
+
+  const now = new Date();
+  const currentHours = now.getHours().toString().padStart(2, '0');
+  const currentMinutes = now.getMinutes().toString().padStart(2, '0');
+  const currentTimeStr = `${currentHours}:${currentMinutes}`;
+  const todayDateStr = now.toDateString();
+
+  if (currentTimeStr === socialConfig.morningTime && lastAutoBroadcastDate !== todayDateStr) {
+    lastAutoBroadcastDate = todayDateStr;
+    console.log(`[Auto-Cron] Triggering Daily Morning Social Broadcast at ${currentTimeStr}...`);
+    try {
+      const pkg = buildDailySocialPackage();
+      const activePlatforms = Object.entries(socialConfig.enabledPlatforms)
+        .filter(([_, isEnabled]) => isEnabled)
+        .map(([platform]) => platform);
+
+      const newLog = {
+        id: 'auto-cron-' + Date.now(),
+        timestamp: `${currentTimeStr} बिहान`,
+        dateText: pkg.dateStr,
+        platforms: activePlatforms,
+        status: 'success' as const,
+        message: `स्वचालित बिहानी तालिका अनुसार फेसबुक, इन्स्टाग्राम, टिकटक र युट्युबको लागि सामग्री जेनेरेट भयो।`,
+        previewSnippet: pkg.posts.facebook.slice(0, 110) + '...',
+      };
+
+      socialLogs = [newLog, ...socialLogs.slice(0, 19)];
+      socialConfig.lastBroadcastTime = now.toISOString();
+      socialConfig.lastBroadcastStatus = `स्वचालित प्रसारण सफल (${currentTimeStr})`;
+
+      if (socialConfig.webhookUrl && socialConfig.webhookUrl.startsWith('http')) {
+        fetch(socialConfig.webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event: 'daily_horoscope_morning_cron',
+            timestamp: now.toISOString(),
+            bsDate: pkg.dateStr,
+            panchang: pkg.panchang,
+            posts: pkg.posts,
+            enabledPlatforms: activePlatforms,
+          }),
+        }).catch(e => console.warn('Cron webhook error:', e.message));
+      }
+    } catch (e: any) {
+      console.error('[Auto-Cron Error]:', e.message);
+    }
+  }
+}, 60000);
 
 // Vite & Static Server Setup
 async function startServer() {

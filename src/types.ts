@@ -114,3 +114,42 @@ export interface LivePredictionResponse {
   planetaryPositionsSummary?: string;
   astrologerNotes?: string;
 }
+
+export type SocialPlatform = 'facebook' | 'instagram' | 'tiktok' | 'youtube';
+
+export interface SocialPostDraft {
+  platform: SocialPlatform;
+  platformNameNe: string;
+  title: string;
+  content: string;
+  hashtags: string[];
+  shortScript?: string;
+  suggestedMusic?: string;
+  cardHeadline?: string;
+}
+
+export interface SocialAutoPostSettings {
+  enabled: boolean;
+  morningTime: string; // e.g. "06:00"
+  webhookUrl: string; // Zapier / Make / Pipedream / Custom endpoint
+  metaAccessToken?: string; // Optional Facebook / IG Graph API Token
+  autoGenerateImage: boolean;
+  enabledPlatforms: {
+    facebook: boolean;
+    instagram: boolean;
+    tiktok: boolean;
+    youtube: boolean;
+  };
+  lastBroadcastTime?: string;
+  lastBroadcastStatus?: string;
+}
+
+export interface SocialBroadcastLog {
+  id: string;
+  timestamp: string;
+  dateText: string;
+  platforms: SocialPlatform[];
+  status: 'success' | 'warning' | 'error';
+  message: string;
+  previewSnippet: string;
+}

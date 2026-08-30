@@ -1,8 +1,8 @@
 import React from 'react';
-import { Calendar, Sparkles, Compass, Clock, Volume2 } from 'lucide-react';
+import { Calendar, Sparkles, Compass, Clock, Volume2, Share2 } from 'lucide-react';
 import { playTempleBell } from '../utils/audio';
 
-export type MainTab = 'panchang' | 'rashifal' | 'ai_astrologer' | 'muhurat';
+export type MainTab = 'panchang' | 'rashifal' | 'ai_astrologer' | 'muhurat' | 'social_autopost';
 
 interface NavbarProps {
   activeTab: MainTab;
@@ -114,6 +114,19 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Clock className="w-4 h-4 text-amber-400" />
               <span>४. शुभ मुहूर्त</span>
             </button>
+
+            {/* 5. Automated Social Media Poster */}
+            <button
+              onClick={() => setActiveTab('social_autopost')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all cursor-pointer ${
+                activeTab === 'social_autopost'
+                  ? 'bg-gradient-to-r from-amber-500/25 to-amber-600/30 text-amber-300 border border-amber-500/40 shadow-inner'
+                  : 'text-zinc-300 hover:text-amber-200 hover:bg-white/5'
+              }`}
+            >
+              <Share2 className="w-4 h-4 text-amber-400" />
+              <span>५. स्वचालित पोस्ट</span>
+            </button>
           </nav>
         </div>
 
@@ -162,6 +175,17 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <Clock className="w-3.5 h-3.5 text-amber-400" />
             <span>शुभ मुहूर्त</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('social_autopost')}
+            className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'social_autopost'
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                : 'text-zinc-400 hover:text-white'
+            }`}
+          >
+            <Share2 className="w-3.5 h-3.5 text-amber-400" />
+            <span>स्वचालित पोस्ट</span>
           </button>
         </div>
       </div>
