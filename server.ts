@@ -290,6 +290,8 @@ app.post('/api/tts', async (req, res) => {
 });
 
 // --- SOCIAL MEDIA AUTOMATED POSTING & DISPATCH ENGINE ---
+const DEFAULT_MAKE_WEBHOOK_URL = 'https://hook.us2.make.com/9aakku13k7jg7fzb1ezuo6zp7aj6ipak';
+
 interface SocialAutoPostConfig {
   enabled: boolean;
   morningTime: string; // "06:00"
@@ -309,7 +311,7 @@ interface SocialAutoPostConfig {
 let socialConfig: SocialAutoPostConfig = {
   enabled: true,
   morningTime: '06:00',
-  webhookUrl: '',
+  webhookUrl: DEFAULT_MAKE_WEBHOOK_URL,
   metaAccessToken: '',
   autoGenerateImage: true,
   enabledPlatforms: {
@@ -337,12 +339,12 @@ let socialLogs: Array<{
     dateText: 'आजको पञ्चाङ्ग तथा राशिफल',
     platforms: ['facebook', 'instagram', 'tiktok', 'youtube'],
     status: 'success',
-    message: 'स्वचालित सामाजिक सञ्जाल प्रसारण प्रणाली सक्रिय भएको छ। प्रत्येक बिहान ६:०० बजे स्वतः पोस्ट तयार हुनेछ।',
-    previewSnippet: '🚩 दैनिक राशिफल तथा पञ्चाङ्ग: १२ वटै राशिका शुभ अङ्क, रङ्ग तथा फल तयार भएको छ।',
+    message: 'Make.com Webhook र स्वचालित सामाजिक सञ्जाल प्रसारण प्रणाली सक्रिय भएको छ। Make.com URL: https://hook.us2.make.com/9aakku13k7jg7fzb1ezuo6zp7aj6ipak',
+    previewSnippet: '🚩 दैनिक राशिफल तथा पञ्चाङ्ग: १२ वटै राशिका शुभ अङ्क, रङ्ग, फलादेश तथा पञ्चाङ्ग डाटा पठाउन तयार।',
   },
 ];
 
-// Helper to generate today's social package
+// Helper to generate today's comprehensive social & webhook data package
 function buildDailySocialPackage() {
   const panchang = getTodayPanchang(0);
   const { rasis } = getDynamicRasis(new Date());
@@ -385,6 +387,7 @@ app.get('/api/social/settings', (req, res) => {
     success: true,
     config: socialConfig,
     logs: socialLogs,
+    defaultWebhookUrl: DEFAULT_MAKE_WEBHOOK_URL,
   });
 });
 
@@ -394,6 +397,7 @@ app.post('/api/social/settings', (req, res) => {
   socialConfig = {
     ...socialConfig,
     ...updates,
+    webhookUrl: updates.webhookUrl !== undefined ? updates.webhookUrl : socialConfig.webhookUrl,
     enabledPlatforms: {
       ...socialConfig.enabledPlatforms,
       ...(updates.enabledPlatforms || {}),
@@ -402,12 +406,12 @@ app.post('/api/social/settings', (req, res) => {
 
   res.json({
     success: true,
-    message: 'सामाजिक सञ्जाल स्वचालित सेटिङ सफलतापूर्वक सुरक्षित भयो।',
+    message: 'सामाजिक सञ्जाल तथा Webhook सेटिङ सफलतापूर्वक सुरक्षित भयो।',
     config: socialConfig,
   });
 });
 
-// 9. GET Today's Social Post Content
+// 9. GET Today's Social Post Content & Full Webhook Payload Preview
 app.get('/api/social/today-posts', (req, res) => {
   try {
     const pkg = buildDailySocialPackage();
@@ -420,7 +424,87 @@ app.get('/api/social/today-posts', (req, res) => {
   }
 });
 
-// 10. POST Trigger Instant Broadcast & Webhooks
+// Helper function to dispatch payload to Webhook URL
+async function sendToMakeWebhook(targetUrl: string, pkg: ReturnType<typeof buildDailySocialPackage>, activePlatforms: string[]) {
+  const payload = {
+    event: 'daily_panchang_and_rashi_data',
+    timestamp: new Date().toISOString(),
+    nepaliTimestamp: new Date().toLocaleTimeString('ne-NP', { hour: '2-digit', minute: '2-digit' }),
+    bsDate: pkg.dateStr,
+    adDate: pkg.panchang.adDate,
+    panchang: {
+      bsDate: pkg.panchang.bsDate,
+      adDate: pkg.panchang.adDate,
+      tithi: pkg.panchang.tithi,
+      paksha: pkg.panchang.paksha,
+      nakshatra: pkg.panchang.nakshatra,
+      yoga: pkg.panchang.yoga,
+      karana: pkg.panchang.karana,
+      suryodaya: pkg.panchang.suryodaya,
+      suryasta: pkg.panchang.suryasta,
+      chandraRasi: pkg.panchang.chandraRasi,
+      suryaRasi: pkg.panchang.suryaRasi,
+      abhijitMuhurat: pkg.panchang.abhijitMuhurat,
+      rahuKaal: pkg.panchang.rahuKaal,
+      yamaGhanta: pkg.panchang.yamaGhanta,
+      gulikaKaal: pkg.panchang.gulikaKaal,
+      dishaShool: pkg.panchang.dishaShool,
+      samvatsara: pkg.panchang.samvatsara,
+      ritu: pkg.panchang.ritu,
+      aayan: pkg.panchang.aayan,
+      festival: pkg.panchang.festival || '',
+    },
+    rasis: pkg.rasis.map(r => ({
+      id: r.id,
+      nepaliName: r.nepaliName,
+      englishName: r.englishName,
+      symbolEmoji: r.symbolEmoji,
+      symbol: r.symbol,
+      element: r.element,
+      lord: r.lord,
+      friendlyRasi: r.friendlyRasi,
+      luckyColor: r.daily.luckyColor,
+      luckyNumber: r.daily.luckyNumber,
+      luckyDirection: r.daily.luckyDirection,
+      summary: r.daily.summary,
+      career: r.daily.career,
+      wealth: r.daily.wealth,
+      love: r.daily.love,
+      health: r.daily.health,
+      rating: r.daily.rating,
+      highlights: r.daily.highlights,
+      namakshyar: `${r.nepaliNamakshyar} (${r.englishNamakshyar})`,
+      vedicMantra: r.vedicMantra,
+    })),
+    formattedPosts: {
+      facebook: pkg.posts.facebook,
+      instagram: pkg.posts.instagram,
+      tiktok: pkg.posts.tiktok,
+      youtube: pkg.posts.youtube,
+    },
+    enabledPlatforms: activePlatforms,
+  };
+
+  const response = await fetch(targetUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/plain, */*',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const responseText = await response.text();
+  return {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    responseText,
+    payload,
+  };
+}
+
+// 10. POST Trigger Instant Broadcast & Send to Make.com Webhook
 app.post('/api/social/trigger-broadcast', async (req, res) => {
   try {
     const pkg = buildDailySocialPackage();
@@ -428,38 +512,39 @@ app.post('/api/social/trigger-broadcast', async (req, res) => {
       .filter(([_, isEnabled]) => isEnabled)
       .map(([platform]) => platform);
 
+    const targetUrl = (req.body && req.body.webhookUrl) || socialConfig.webhookUrl || DEFAULT_MAKE_WEBHOOK_URL;
     let webhookStatus = 'स्थानीय रूपमा तयार गरियो';
+    let webhookDetails: any = null;
 
-    if (socialConfig.webhookUrl && socialConfig.webhookUrl.startsWith('http')) {
+    if (targetUrl && targetUrl.startsWith('http')) {
       try {
-        const response = await fetch(socialConfig.webhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            event: 'daily_horoscope_publish',
-            timestamp: new Date().toISOString(),
-            bsDate: pkg.dateStr,
-            panchang: pkg.panchang,
-            posts: pkg.posts,
-            enabledPlatforms: activePlatforms,
-          }),
-        });
-        webhookStatus = response.ok
-          ? `Webhook मा पठाइयो (Status: ${response.status})`
-          : `Webhook त्रुटि (${response.statusText})`;
+        const result = await sendToMakeWebhook(targetUrl, pkg, activePlatforms);
+        webhookDetails = {
+          url: targetUrl,
+          statusCode: result.status,
+          statusText: result.statusText,
+          response: result.responseText,
+        };
+
+        if (result.ok) {
+          webhookStatus = `Make.com Webhook मा सफलतापूर्वक पठाइयो (${result.status} ${result.statusText})`;
+        } else {
+          webhookStatus = `Make.com Webhook त्रुटि (${result.status} ${result.statusText})`;
+        }
       } catch (webhookErr: any) {
         webhookStatus = `Webhook सम्पर्क हुन सकेन: ${webhookErr.message}`;
+        webhookDetails = { error: webhookErr.message };
       }
     }
 
     const newLog = {
       id: 'log-' + Date.now(),
-      timestamp: new Date().toLocaleTimeString('ne-NP', { hour: '2-digit', minute: '2-digit' }),
+      timestamp: new Date().toLocaleTimeString('ne-NP', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       dateText: pkg.dateStr,
       platforms: activePlatforms,
       status: 'success' as const,
-      message: `फेसबुक, इन्स्टाग्राम, टिकटक तथा युट्युबका लागि दैनिक पोस्ट तथा इमेज कार्ड सफलतापूर्वक तयार गरियो। (${webhookStatus})`,
-      previewSnippet: pkg.posts.facebook.slice(0, 120) + '...',
+      message: `पञ्चाङ्ग र १२ राशिको डाटा Make.com Webhook (${targetUrl}) मा POST गरियो। (${webhookStatus})`,
+      previewSnippet: `[Webhook POST]: ${pkg.dateStr} | १२ राशि | पञ्चाङ्ग: ${pkg.panchang.tithi} | Status: ${webhookStatus}`,
     };
 
     socialLogs = [newLog, ...socialLogs.slice(0, 19)];
@@ -468,9 +553,56 @@ app.post('/api/social/trigger-broadcast', async (req, res) => {
 
     res.json({
       success: true,
-      message: 'आजको सम्पूर्ण राशिफल तथा पञ्चाङ्ग स्वचालित पोस्ट तयार भयो र प्रसारण गरियो!',
+      message: 'आजको सम्पूर्ण पञ्चाङ्ग तथा १२ राशिको डाटा Webhook मा सफलतापूर्वक पठाइयो!',
       log: newLog,
+      webhookDetails,
       data: pkg,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Dedicated POST Endpoint to send Panchang & Rashi directly to Webhook
+app.post('/api/webhook/send-panchang-rashi', async (req, res) => {
+  try {
+    const pkg = buildDailySocialPackage();
+    const targetUrl = req.body?.webhookUrl || socialConfig.webhookUrl || DEFAULT_MAKE_WEBHOOK_URL;
+    const activePlatforms = Object.entries(socialConfig.enabledPlatforms)
+      .filter(([_, isEnabled]) => isEnabled)
+      .map(([platform]) => platform);
+
+    const result = await sendToMakeWebhook(targetUrl, pkg, activePlatforms);
+
+    const newLog = {
+      id: 'log-' + Date.now(),
+      timestamp: new Date().toLocaleTimeString('ne-NP', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      dateText: pkg.dateStr,
+      platforms: activePlatforms,
+      status: (result.ok ? 'success' : 'warning') as any,
+      message: `दैनिक पञ्चाङ्ग र १२ राशिको डाटा Webhook मा पठाइयो (${result.status} ${result.statusText})`,
+      previewSnippet: `URL: ${targetUrl} | Status: ${result.status} | Response: ${result.responseText.slice(0, 80)}`,
+    };
+
+    socialLogs = [newLog, ...socialLogs.slice(0, 19)];
+    socialConfig.lastBroadcastTime = new Date().toISOString();
+    socialConfig.lastBroadcastStatus = `Webhook पठाइयो (${result.status})`;
+
+    res.json({
+      success: result.ok,
+      statusCode: result.status,
+      statusText: result.statusText,
+      webhookResponse: result.responseText,
+      targetUrl,
+      bsDate: pkg.dateStr,
+      message: result.ok
+        ? 'Make.com Webhook मा दैनिक पञ्चाङ्ग र राशिफल डाटा सफलतापूर्वक प्राप्त भयो (POST 200 OK)!'
+        : `Make.com Webhook बाट त्रुटि प्राप्त भयो (${result.status}): ${result.responseText}`,
+      payloadSummary: {
+        panchang: `${pkg.panchang.bsDate} - ${pkg.panchang.tithi}, ${pkg.panchang.nakshatra}`,
+        totalRasis: pkg.rasis.length,
+        platforms: activePlatforms,
+      },
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -549,18 +681,9 @@ setInterval(() => {
       socialConfig.lastBroadcastStatus = `स्वचालित प्रसारण सफल (${currentTimeStr})`;
 
       if (socialConfig.webhookUrl && socialConfig.webhookUrl.startsWith('http')) {
-        fetch(socialConfig.webhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            event: 'daily_horoscope_morning_cron',
-            timestamp: now.toISOString(),
-            bsDate: pkg.dateStr,
-            panchang: pkg.panchang,
-            posts: pkg.posts,
-            enabledPlatforms: activePlatforms,
-          }),
-        }).catch(e => console.warn('Cron webhook error:', e.message));
+        sendToMakeWebhook(socialConfig.webhookUrl, pkg, activePlatforms)
+          .then(res => console.log(`[Auto-Cron] Sent to Webhook with status: ${res.status}`))
+          .catch(e => console.warn('[Auto-Cron] Webhook error:', e.message));
       }
     } catch (e: any) {
       console.error('[Auto-Cron Error]:', e.message);

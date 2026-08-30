@@ -14,6 +14,26 @@ interface SocialAutoPostViewProps {
   rasis: RasiInfo[];
 }
 
+const DEFAULT_WEBHOOK_URL = 'https://hook.us2.make.com/9aakku13k7jg7fzb1ezuo6zp7aj6ipak';
+
+// Safe JSON parser to prevent "Unexpected token 'T', The page c... is not valid JSON" errors
+async function safeFetchJson(input: RequestInfo | URL, init?: RequestInit): Promise<any> {
+  const response = await fetch(input, init);
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    // If not JSON (e.g. "Accepted" or HTML), return structured object
+    return {
+      success: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      rawText: text,
+      message: response.ok ? text : `Server returned non-JSON response (${response.status}): ${text.slice(0, 150)}`
+    };
+  }
+}
+
 export const SocialAutoPostView: React.FC<SocialAutoPostViewProps> = ({
   panchang,
   rasis
@@ -22,7 +42,18 @@ export const SocialAutoPostView: React.FC<SocialAutoPostViewProps> = ({
   const [activeSubTab, setActiveSubTab] = useState<'content' | 'images' | 'automation' | 'logs'>('content');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [isBroadcasting, setIsBroadcasting] = useState<boolean>(false);
-  const [broadcastMessage, setBroadcastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [broadcastMessage, setBroadcastMessage] = useState<{ type: 'success' | 'error'; text: string; details?: any } | null>(null);
+
+  // Dedicated Webhook State
+  const [isTestingWebhook, setIsTestingWebhook] = useState<boolean>(false);
+  const [webhookResult, setWebhookResult] = useState<{
+    success: boolean;
+    statusCode?: number;
+    statusText?: string;
+    message?: string;
+    targetUrl?: string;
+  } | null>(null);
+  const [showJsonPayload, setShowJsonPayload] = useState<boolean>(false);
 
   // AI re-write state
   const [aiTone, setAiTone] = useState<string>('भक्तिमय र प्रेरणादायी');
@@ -38,7 +69,7 @@ export const SocialAutoPostView: React.FC<SocialAutoPostViewProps> = ({
   const [settings, setSettings] = useState<SocialAutoPostSettings>({
     enabled: true,
     morningTime: '06:00',
-    webhookUrl: '',
+    webhookUrl: DEFAULT_WEBHOOK_URL,
     metaAccessToken: '',
     autoGenerateImage: true,
     enabledPlatforms: {
@@ -60,16 +91,69 @@ export const SocialAutoPostView: React.FC<SocialAutoPostViewProps> = ({
 
   // Fetch settings & logs on mount
   useEffect(() => {
-    fetch('/api/social/settings')
-      .then(res => res.json())
+    safeFetchJson('/api/social/settings')
       .then(data => {
         if (data.success) {
-          if (data.config) setSettings(data.config);
+          if (data.config) {
+            setSettings({
+              ...data.config,
+              webhookUrl: data.config.webhookUrl || DEFAULT_WEBHOOK_URL,
+            });
+          }
           if (data.logs) setLogs(data.logs);
         }
       })
       .catch(err => console.warn('Error fetching social settings:', err));
   }, []);
+
+  // Construct raw sample payload for UI preview
+  const sampleWebhookPayload = {
+    event: 'daily_panchang_and_rashi_data',
+    timestamp: new Date().toISOString(),
+    bsDate: panchang.bsDate,
+    adDate: panchang.adDate,
+    panchang: {
+      bsDate: panchang.bsDate,
+      adDate: panchang.adDate,
+      tithi: panchang.tithi,
+      paksha: panchang.paksha,
+      nakshatra: panchang.nakshatra,
+      yoga: panchang.yoga,
+      karana: panchang.karana,
+      suryodaya: panchang.suryodaya,
+      suryasta: panchang.suryasta,
+      abhijitMuhurat: panchang.abhijitMuhurat,
+      rahuKaal: panchang.rahuKaal,
+      samvatsara: panchang.samvatsara,
+      festival: panchang.festival,
+    },
+    totalRasis: rasis.length,
+    rasis: rasis.map(r => ({
+      id: r.id,
+      nepaliName: r.nepaliName,
+      englishName: r.englishName,
+      symbolEmoji: r.symbolEmoji,
+      element: r.element,
+      lord: r.lord,
+      luckyColor: r.daily.luckyColor,
+      luckyNumber: r.daily.luckyNumber,
+      luckyDirection: r.daily.luckyDirection,
+      summary: r.daily.summary,
+      career: r.daily.career,
+      wealth: r.daily.wealth,
+      love: r.daily.love,
+      health: r.daily.health,
+      rating: r.daily.rating,
+      namakshyar: `${r.nepaliNamakshyar} (${r.englishNamakshyar})`,
+      vedicMantra: r.vedicMantra,
+    })),
+    formattedPosts: {
+      facebook: defaultDrafts.facebook.content,
+      instagram: defaultDrafts.instagram.content,
+      tiktok: defaultDrafts.tiktok.content,
+      youtube: defaultDrafts.youtube.content,
+    }
+  };
 
   // Redraw canvas whenever options change
   useEffect(() => {
@@ -103,15 +187,16 @@ export const SocialAutoPostView: React.FC<SocialAutoPostViewProps> = ({
     playTempleBell();
 
     try {
-      const res = await fetch('/api/social/trigger-broadcast', {
+      const data = await safeFetchJson('/api/social/trigger-broadcast', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ webhookUrl: settings.webhookUrl || DEFAULT_WEBHOOK_URL })
       });
-      const data = await res.json();
       if (data.success) {
         setBroadcastMessage({
           type: 'success',
-          text: 'सफलतापूर्वक प्रसारण भयो! फेसबुक, इन्स्टाग्राम, टिकटक र युट्युबका लागि दैनिक सामग्री र इमेज तयार भएको छ।'
+          text: `सफलतापूर्वक प्रसारण भयो! Make.com Webhook (${settings.webhookUrl || DEFAULT_WEBHOOK_URL}) मा आजको पञ्चाङ्ग र १२ राशिको डाटा पठाइयो।`,
+          details: data.webhookDetails
         });
         if (data.log) {
           setLogs(prev => [data.log, ...prev]);
@@ -119,7 +204,7 @@ export const SocialAutoPostView: React.FC<SocialAutoPostViewProps> = ({
       } else {
         setBroadcastMessage({
           type: 'error',
-          text: data.error || 'प्रसारण गर्दा त्रुटि देखा पर्‍यो।'
+          text: data.message || data.error || 'प्रसारण गर्दा त्रुटि देखा पर्‍यो।'
         });
       }
     } catch (err: any) {
@@ -132,11 +217,51 @@ export const SocialAutoPostView: React.FC<SocialAutoPostViewProps> = ({
     }
   };
 
+  // Dedicated Handler: Send Directly to Make.com Webhook URL via POST
+  const handleSendToWebhookNow = async () => {
+    setIsTestingWebhook(true);
+    setWebhookResult(null);
+    playTempleBell();
+
+    try {
+      const target = settings.webhookUrl || DEFAULT_WEBHOOK_URL;
+      const data = await safeFetchJson('/api/webhook/send-panchang-rashi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ webhookUrl: target })
+      });
+
+      setWebhookResult({
+        success: data.success,
+        statusCode: data.statusCode || data.status,
+        statusText: data.statusText,
+        message: data.message || (data.success ? 'Make.com मा पञ्चाङ्ग र राशिफल सफलतापूर्वक प्राप्त भयो!' : 'Webhook त्रुटि'),
+        targetUrl: target,
+      });
+
+      if (data.success) {
+        playOmChime();
+        // Refresh logs
+        safeFetchJson('/api/social/settings')
+          .then(d => { if (d.logs) setLogs(d.logs); })
+          .catch(() => {});
+      }
+    } catch (err: any) {
+      setWebhookResult({
+        success: false,
+        message: 'Webhook पठाउन सकिएन: ' + err.message,
+        targetUrl: settings.webhookUrl || DEFAULT_WEBHOOK_URL,
+      });
+    } finally {
+      setIsTestingWebhook(false);
+    }
+  };
+
   // Handle AI Content Generation
   const handleGenerateAiText = async () => {
     setIsGeneratingAi(true);
     try {
-      const res = await fetch('/api/social/generate-ai-script', {
+      const data = await safeFetchJson('/api/social/generate-ai-script', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -144,7 +269,6 @@ export const SocialAutoPostView: React.FC<SocialAutoPostViewProps> = ({
           customTone: aiTone
         })
       });
-      const data = await res.json();
       if (data.success && data.generatedContent) {
         setCustomGeneratedDrafts(prev => ({
           ...prev,
@@ -174,15 +298,16 @@ export const SocialAutoPostView: React.FC<SocialAutoPostViewProps> = ({
   const handleSaveSettings = async () => {
     setIsSavingSettings(true);
     try {
-      const res = await fetch('/api/social/settings', {
+      const data = await safeFetchJson('/api/social/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
       });
-      const data = await res.json();
       if (data.success) {
         playTempleBell();
         alert('सेटिङ सफलतापूर्वक सुरक्षित गरियो!');
+      } else {
+        alert('सेटिङ: ' + (data.message || 'त्रुटि देखा पर्यो'));
       }
     } catch (e: any) {
       alert('सेटिङ सुरक्षित गर्न सकिएन: ' + e.message);
@@ -218,6 +343,24 @@ export const SocialAutoPostView: React.FC<SocialAutoPostViewProps> = ({
 
           <div className="flex flex-wrap items-center gap-3">
             <button
+              onClick={handleSendToWebhookNow}
+              disabled={isTestingWebhook}
+              className="px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold text-xs sm:text-sm shadow-xl shadow-emerald-500/30 flex items-center gap-2 cursor-pointer transition-all active:scale-95 disabled:opacity-50"
+            >
+              {isTestingWebhook ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Webhook मा पठाउँदै...</span>
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4" />
+                  <span>Make.com Webhook मा पठाउनुहोस्</span>
+                </>
+              )}
+            </button>
+
+            <button
               onClick={handleTriggerBroadcast}
               disabled={isBroadcasting}
               className="px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs sm:text-sm shadow-xl shadow-amber-500/30 flex items-center gap-2 cursor-pointer transition-all active:scale-95 disabled:opacity-50"
@@ -229,16 +372,48 @@ export const SocialAutoPostView: React.FC<SocialAutoPostViewProps> = ({
                 </>
               ) : (
                 <>
-                  <Send className="w-4 h-4" />
-                  <span>अहिले तुरुन्तै प्रसारण गर्नुहोस्</span>
+                  <Share2 className="w-4 h-4" />
+                  <span>सबै प्लेटफर्म प्रसारण</span>
                 </>
               )}
             </button>
           </div>
         </div>
 
+        {/* Live Webhook Result Alert */}
+        {webhookResult && (
+          <div className={`mt-4 p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs sm:text-sm animate-fadeIn ${
+            webhookResult.success 
+              ? 'bg-emerald-950/70 border-emerald-500/50 text-emerald-100' 
+              : 'bg-rose-950/70 border-rose-500/50 text-rose-100'
+          }`}>
+            <div className="flex items-center gap-3">
+              {webhookResult.success ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+              )}
+              <div>
+                <div className="font-bold">
+                  {webhookResult.message}
+                </div>
+                <div className="text-[11px] opacity-80 font-mono mt-0.5">
+                  URL: {webhookResult.targetUrl} {webhookResult.statusCode ? `• Status: ${webhookResult.statusCode} ${webhookResult.statusText || ''}` : ''}
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setActiveSubTab('automation')}
+              className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold shrink-0 cursor-pointer"
+            >
+              Webhook विवरण हेर्नुहोस्
+            </button>
+          </div>
+        )}
+
         {broadcastMessage && (
-          <div className={`mt-4 p-4 rounded-2xl border flex items-center gap-3 text-xs sm:text-sm ${
+          <div className={`mt-4 p-4 rounded-2xl border flex items-center gap-3 text-xs sm:text-sm animate-fadeIn ${
             broadcastMessage.type === 'success' 
               ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-200' 
               : 'bg-rose-950/50 border-rose-500/40 text-rose-200'
@@ -643,6 +818,122 @@ export const SocialAutoPostView: React.FC<SocialAutoPostViewProps> = ({
       ───────────────────────────────────────────────────────────── */}
       {activeSubTab === 'automation' && (
         <div className="space-y-6">
+          {/* Make.com Webhook Quick Action Card */}
+          <div className="bg-gradient-to-br from-[#12241d] via-[#141d24] to-[#121420] border-2 border-emerald-500/40 rounded-3xl p-6 sm:p-8 space-y-5 shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-72 h-72 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-emerald-500/30">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    Make.com Active Webhook Endpoint
+                  </span>
+                </div>
+                <h3 className="text-xl sm:text-2xl font-extrabold text-emerald-100 flex items-center gap-2.5">
+                  <Send className="w-6 h-6 text-emerald-400" />
+                  <span>दैनिक पञ्चाङ्ग तथा १२ राशि Webhook प्रसारण</span>
+                </h3>
+                <p className="text-xs sm:text-sm text-zinc-300 mt-1 max-w-xl">
+                  तलको Make.com Webhook URL मा आजको मिति, सम्पूर्ण पञ्चाङ्ग र १२ वटै राशिको विस्तृत फलादेश JSON पेलोडको रूपमा POST गरिन्छ।
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  onClick={handleSendToWebhookNow}
+                  disabled={isTestingWebhook}
+                  className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-slate-950 font-extrabold text-sm shadow-xl shadow-emerald-500/30 flex items-center gap-2 cursor-pointer transition-all active:scale-95 disabled:opacity-50"
+                >
+                  {isTestingWebhook ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Webhook मा पठाउँदै...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      <span>Make.com Webhook मा POST गर्नुहोस्</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Configured Target URL Display */}
+            <div className="p-4 rounded-2xl bg-black/60 border border-emerald-500/30 space-y-2">
+              <div className="flex items-center justify-between text-xs text-zinc-400 font-medium">
+                <span className="text-emerald-300 font-bold flex items-center gap-1.5">
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  सक्रिय Webhook गन्तव्य ठेगाना (POST URL):
+                </span>
+                <button
+                  onClick={() => handleCopy(settings.webhookUrl || DEFAULT_WEBHOOK_URL, 'webhook-url')}
+                  className="text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  {copiedKey === 'webhook-url' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedKey === 'webhook-url' ? 'कपी भयो!' : 'URL कपी'}</span>
+                </button>
+              </div>
+              <div className="font-mono text-xs sm:text-sm text-emerald-200 break-all select-all bg-zinc-950/80 p-2.5 rounded-xl border border-white/5">
+                {settings.webhookUrl || DEFAULT_WEBHOOK_URL}
+              </div>
+            </div>
+
+            {/* Test result status display if triggered */}
+            {webhookResult && (
+              <div className={`p-4 rounded-2xl border flex items-start gap-3 text-xs sm:text-sm animate-fadeIn ${
+                webhookResult.success 
+                  ? 'bg-emerald-950/80 border-emerald-500/60 text-emerald-100' 
+                  : 'bg-rose-950/80 border-rose-500/60 text-rose-100'
+              }`}>
+                {webhookResult.success ? (
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                )}
+                <div className="space-y-1">
+                  <div className="font-bold text-sm">
+                    {webhookResult.message}
+                  </div>
+                  {webhookResult.statusCode && (
+                    <div className="text-xs opacity-90">
+                      HTTP Response: <span className="font-mono font-bold">{webhookResult.statusCode} {webhookResult.statusText || ''}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* JSON Payload Inspector Accordion */}
+            <div className="pt-2">
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => setShowJsonPayload(!showJsonPayload)}
+                  className="text-xs text-emerald-300 hover:text-emerald-200 font-semibold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>{showJsonPayload ? 'JSON पेलोड लुकाउनुहोस्' : 'Make.com मा जाने JSON पेलोड हेर्नुहोस्'}</span>
+                </button>
+
+                <button
+                  onClick={() => handleCopy(JSON.stringify(sampleWebhookPayload, null, 2), 'webhook-payload')}
+                  className="text-xs text-amber-300 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  {copiedKey === 'webhook-payload' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedKey === 'webhook-payload' ? 'पेलोड कपी भयो!' : 'JSON पेलोड कपी गर्नुहोस्'}</span>
+                </button>
+              </div>
+
+              {showJsonPayload && (
+                <div className="mt-3 bg-black/80 rounded-2xl p-4 border border-emerald-500/30 overflow-x-auto max-h-72 text-[11px] font-mono text-emerald-300/90 select-all animate-fadeIn">
+                  <pre>{JSON.stringify(sampleWebhookPayload, null, 2)}</pre>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Main Settings Card */}
           <div className="bg-[#141624] border border-amber-500/30 rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl">
             <div className="pb-4 border-b border-amber-500/20">
               <h3 className="text-lg sm:text-xl font-bold text-amber-200 flex items-center gap-2">
@@ -650,7 +941,7 @@ export const SocialAutoPostView: React.FC<SocialAutoPostViewProps> = ({
                 <span>दैनिक बिहानी तालिका र Webhook प्रसारण सेटिङ</span>
               </h3>
               <p className="text-xs text-zinc-400 mt-1">
-                यहाँबाट तपाईंले दैनिक स्वचालित पोस्टिङ समय र बाह्य प्लेटफर्म (Zapier / Make.com / Meta Webhook) जोड्न सक्नुहुन्छ।
+                यहाँबाट तपाईंले दैनिक स्वचालित पोस्टिङ समय र बाह्य प्लेटफर्म (Make.com / Zapier / Meta Webhook) कन्फिगर गर्न सक्नुहुन्छ।
               </p>
             </div>
 
@@ -659,7 +950,7 @@ export const SocialAutoPostView: React.FC<SocialAutoPostViewProps> = ({
               <div className="flex items-center justify-between p-4 rounded-2xl bg-black/40 border border-amber-500/20">
                 <div>
                   <div className="text-sm font-bold text-white">दैनिक स्वचालित प्रसारण इन्जिन</div>
-                  <div className="text-xs text-zinc-400">प्रत्येक बिहान स्वचालित रूपमा सामग्री जेनेरेट गरी प्रसारण गर्ने</div>
+                  <div className="text-xs text-zinc-400">प्रत्येक बिहान स्वचालित रूपमा सामग्री जेनेरेट गरी Webhook मा पठाउने</div>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -672,7 +963,7 @@ export const SocialAutoPostView: React.FC<SocialAutoPostViewProps> = ({
                 </label>
               </div>
 
-              {/* 2. Morning Time Picker */}
+              {/* 2. Morning Time Picker & Webhook URL */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="p-4 rounded-2xl bg-black/40 border border-amber-500/20">
                   <label className="block text-xs font-bold text-amber-300 mb-1">
@@ -691,18 +982,27 @@ export const SocialAutoPostView: React.FC<SocialAutoPostViewProps> = ({
 
                 {/* Webhook URL Input */}
                 <div className="p-4 rounded-2xl bg-black/40 border border-amber-500/20">
-                  <label className="block text-xs font-bold text-amber-300 mb-1">
-                    स्वचालित Webhook URL (Zapier / Make / Meta API):
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold text-amber-300">
+                      Webhook URL (Make.com / Zapier):
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setSettings({ ...settings, webhookUrl: DEFAULT_WEBHOOK_URL })}
+                      className="text-[10px] text-emerald-400 hover:underline cursor-pointer"
+                    >
+                      Make.com URL रिसेट
+                    </button>
+                  </div>
                   <input
                     type="url"
-                    placeholder="https://hook.make.com/... वा https://hooks.zapier.com/..."
+                    placeholder="https://hook.us2.make.com/..."
                     value={settings.webhookUrl}
                     onChange={e => setSettings({ ...settings, webhookUrl: e.target.value })}
-                    className="bg-zinc-900 border border-amber-500/30 text-white text-xs rounded-xl px-3 py-2 w-full focus:outline-none focus:border-amber-400"
+                    className="bg-zinc-900 border border-amber-500/30 text-white text-xs font-mono rounded-xl px-3 py-2 w-full focus:outline-none focus:border-amber-400"
                   />
                   <div className="text-[11px] text-zinc-400 mt-1">
-                    यसमा प्रत्येक बिहान स्वतः JSON पेलोड तथा पोस्टहरू डेलिभर हुनेछ।
+                    यसमा प्रत्येक बिहान स्वतः १२ राशि र पञ्चाङ्गको JSON डाटा POST हुनेछ।
                   </div>
                 </div>
               </div>
@@ -740,13 +1040,13 @@ export const SocialAutoPostView: React.FC<SocialAutoPostViewProps> = ({
               <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-xs text-zinc-300 space-y-2 leading-relaxed">
                 <div className="font-bold text-amber-300 flex items-center gap-1.5">
                   <Sparkles className="w-4 h-4" />
-                  <span>कसरी सिधै फेसबुक पेज वा इन्स्टाग्राममा स्वतः पोस्ट गर्ने? (Zero-Touch Setup Guide)</span>
+                  <span>कसरी Make.com बाट फेसबुक, इन्स्टाग्राम र टिकटकमा सिधै अटो-पोस्ट गर्ने?</span>
                 </div>
                 <ol className="list-decimal list-inside space-y-1 text-zinc-300">
-                  <li><strong>Make.com</strong> वा <strong>Zapier</strong> मा गई नि:शुल्क Custom Webhook सिर्जना गर्नुहोस्।</li>
-                  <li>माथि दिइएको Webhook URL बक्समा उक्त लिङ्क पेस्ट गरी <strong>सुरक्षित गर्नुहोस्</strong> थिच्नुहोस्।</li>
-                  <li>हाम्रो एपले प्रत्येक बिहान {settings.morningTime} बजे स्वतः आजको १२ वटै राशि, पञ्चाङ्ग र इमेज डेटा उक्त Webhook मा पठाउनेछ।</li>
-                  <li>Make.com वा Zapier ले सिधै तपाईंको Facebook Page, Instagram Business, TikTok वा YouTube Community मा बिना कुनै झन्झट स्वतः पोस्ट गरिदिनेछ।</li>
+                  <li><strong>Make.com</strong> मा तपाईंको Webhook <code className="text-emerald-300 bg-black/40 px-1.5 py-0.5 rounded">https://hook.us2.make.com/9aakku13k7jg7fzb1ezuo6zp7aj6ipak</code> जोडिएको छ।</li>
+                  <li>माथि रहेको <strong>"Make.com Webhook मा POST गर्नुहोस्"</strong> बटन थिचेर १ पटक प्रत्यक्ष टेस्ट डाटा पठाउनुहोस्।</li>
+                  <li>Make.com ले तुरुन्तै <code className="text-emerald-300 font-mono font-bold">200 Accepted</code> प्रतिक्रिया फर्काउँछ र डाटा प्राप्त गर्दछ।</li>
+                  <li>हाम्रो एपले प्रत्येक बिहान {settings.morningTime} बजे स्वचालित रूपमा सोही Webhook मा आजको ताजा पञ्चाङ्ग र १२ राशिको फलादेश पठाउनेछ।</li>
                 </ol>
               </div>
 
